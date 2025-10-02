@@ -1,0 +1,55 @@
+{
+  "project_info": {
+    "project_number": "239248801372",
+    "project_id": "securitycamapp-8ad47",
+    "storage_bucket": "securitycamapp-8ad47.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:239248801372:android:1adccf1b69e44915ce3099",
+        "android_client_info": {
+          "package_name": "com.securitycamapp"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "239248801372-7b56uppvtk0emrt2sv0gnqo30ql035cq.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.securitycamapp",
+            "certificate_hash": "9eacc2c85e6c082f865054e10413f63f836968fb"
+          }
+        },
+        {
+          "client_id": "239248801372-mt7i4olh0iv5nmhv9c9a216o4t7qe3j9.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.securitycamapp",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
+          "client_id": "239248801372-lu6jshu9j1mrld805tsc5liauslsih6d.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDxQ_CnK5HcV6X8qKABBUbyClUfbQknQtI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "239248801372-lu6jshu9j1mrld805tsc5liauslsih6d.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

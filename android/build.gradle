@@ -1,4 +1,18 @@
 buildscript {
+  dependencies {
+    classpath 'com.google.gms:google-services:4.3.15' // ou versão mais recente
+  }
+}
+
+allprojects {
+  repositories {
+    google()
+    mavenCentral()
+  }
+}
+
+
+buildscript {
     ext {
         buildToolsVersion = "35.0.0"
         minSdkVersion = 24

@@ -1,0 +1,396 @@
+*** Begin Patch
+*** Add File: src/types/navigation.ts
++import { NativeStackNavigationProp } from "@react-navigation/native-stack";
++import { RouteProp } from "@react-navigation/native";
++
++export type RootStackParamList = {
++  Login: undefined;
++  Timeline: undefined;
++  Config: undefined;
++  Camera: undefined;
++  Preview: { ids: string[]; startId: string };
++};
++
++export type NavigationProps<T extends keyof RootStackParamList> =
++  NativeStackNavigationProp<RootStackParamList, T>;
++
++export type RouteProps<T extends keyof RootStackParamList> = RouteProp<
++  RootStackParamList,
++  T
++>;
++
+*** End Patch
+*** Begin Patch
+*** Add File: src/storage/photoStorage.ts
++import RNFS from "react-native-fs";
++import { Platform } from "react-native";
++
++const BASE_DIR = `${RNFS.DocumentDirectoryPath}/security_cam_photos`;
++
++export type PhotoItem = {
++  id: string;        // filename
++  path: string;      // file://...
++  createdAt: number; // epoch ms
++};
++
++export async function ensureBaseDir() {
++  const exists = await RNFS.exists(BASE_DIR);
++  if (!exists) await RNFS.mkdir(BASE_DIR);
++  return BASE_DIR;
++}
++
++export async function persistPhoto(tempPath: string): Promise<PhotoItem> {
++  await ensureBaseDir();
++  const ts = Date.now();
++  const filename = `photo_${ts}.jpg`;
++  const dest = `${BASE_DIR}/${filename}`;
++
++  const normalizedSrc = tempPath.startsWith("file://")
++    ? tempPath.replace("file://", "")
++    : tempPath;
++
++  await RNFS.moveFile(normalizedSrc, dest);
++  return {
++    id: filename,
++    path: Platform.select({
++      ios: `file://${dest}`,
++      android: `file://${dest}`,
++      default: `file://${dest}`,
++    }) as string,
++    createdAt: ts,
++  };
++}
++
++export async function listPhotos(): Promise<PhotoItem[]> {
++  await ensureBaseDir();
++  const entries = await RNFS.readDir(BASE_DIR);
++  return entries
++    .filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".jpg"))
++    .map((e) => ({
++      id: e.name,
++      path: Platform.select({
++        ios: `file://${e.path}`,
++        android: `file://${e.path}`,
++        default: `file://${e.path}`,
++      }) as string,
++      createdAt: e.mtime ? new Date(e.mtime).getTime() : 0,
++    }))
++    .sort((a, b) => b.createdAt - a.createdAt);
++}
++
++export async function removePhoto(item: PhotoItem) {
++  const p = item.path.startsWith("file://") ? item.path.replace("file://", "") : item.path;
++  if (await RNFS.exists(p)) await RNFS.unlink(p);
++}
++
+*** End Patch
+*** Begin Patch
+*** Add File: src/utils/emailService.ts
++import RNFS from "react-native-fs";
++import RNSmtpMailer from "react-native-smtp-mailer";
++
++type SendParams = {
++  to: string;
++  subject: string;
++  body: string;
++  fileUri?: string; // file://...
++};
++
++export async function sendEmailWithPhoto({ to, subject, body, fileUri }: SendParams) {
++  // ⚠️ mova essas credenciais para variáveis seguras/keystore!
++  const HOST = "smtp.seuprovedor.com";
++  const PORT = "465";
++  const USER = "seu_usuario";
++  const PASS = "sua_senha";
++
++  const attachmentPaths: string[] = [];
++  const attachmentNames: string[] = [];
++  const attachmentTypes: string[] = [];
++
++  if (fileUri) {
++    const path = fileUri.replace(/^file:\/\//, "");
++    if (await RNFS.exists(path)) {
++      attachmentPaths.push(path);
++      attachmentNames.push("foto.jpg");
++      attachmentTypes.push("jpg");
++    }
++  }
++
++  return RNSmtpMailer.sendMail({
++    mailhost: HOST,
++    port: PORT,
++    ssl: true,
++    username: USER,
++    password: PASS,
++    from: USER,
++    recipients: to,
++    subject,
++    htmlBody: `<p>${body}</p>`,
++    attachmentPaths,
++    attachmentNames,
++    attachmentTypes,
++  });
++}
++
+*** End Patch
+*** Begin Patch
+*** Add File: src/screens/PreviewScreen.tsx
++import React, { useCallback, useEffect, useState } from "react";
++import { View, Button, Alert, StyleSheet } from "react-native";
++import ImageViewing from "react-native-image-viewing";
++import { NavigationProps, RouteProps } from "../types/navigation";
++import { listPhotos, PhotoItem } from "../storage/photoStorage";
++import { sendEmailWithPhoto } from "../utils/emailService";
++
++type Props = {
++  navigation: NavigationProps<"Preview">;
++  route: RouteProps<"Preview">;
++};
++
++export default function PreviewScreen({ route }: Props) {
++  const { ids, startId } = route.params;
++  const [visible, setVisible] = useState(true);
++  const [index, setIndex] = useState(Math.max(0, ids.indexOf(startId)));
++  const [resolved, setResolved] = useState<{ uri: string }[]>([]);
++
++  useEffect(() => {
++    (async () => {
++      const all = await listPhotos();
++      const map = new Map(all.map((p) => [p.id, p]));
++      setResolved(
++        ids
++          .map((id) => map.get(id))
++          .filter(Boolean)
++          .map((p) => ({ uri: (p as PhotoItem).path }))
++      );
++    })();
++  }, [ids]);
++
++  const handleEmail = useCallback(async () => {
++    try {
++      const current = resolved[index];
++      if (!current) return;
++      await sendEmailWithPhoto({
++        to: "voce@exemplo.com",
++        subject: "Registro de segurança",
++        body: "Segue a foto registrada pelo app.",
++        fileUri: current.uri,
++      });
++      Alert.alert("Enviado", "E-mail enviado com sucesso.");
++    } catch (e: any) {
++      Alert.alert("Falha ao enviar", e?.message || "Verifique a configuração de e-mail.");
++    }
++  }, [resolved, index]);
++
++  return (
++    <View style={styles.container}>
++      <ImageViewing
++        images={resolved.length ? resolved : [{ uri: "" }]}
++        imageIndex={index}
++        visible={visible}
++        onImageIndexChange={setIndex}
++        onRequestClose={() => setVisible(false)}
++      />
++      <View style={styles.actions}>
++        <Button title="Enviar por e-mail" onPress={handleEmail} />
++      </View>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  container: { flex: 1 },
++  actions: { position: "absolute", bottom: 24, alignSelf: "center", width: 220 },
++});
++
+*** End Patch
+*** Begin Patch
+*** Update File: src/screens/TimelineScreen.tsx
+@@
+-import React, { useCallback, useEffect, useState } from "react";
+-import { View, Text, Button, StyleSheet, FlatList, Image, TouchableOpacity, RefreshControl, Alert } from "react-native";
+-import { NavigationProps, RouteProps } from "../types/navigation";
+-import { listPhotos, PhotoItem, removePhoto } from "../storage/photoStorage";
+-import { useFocusEffect } from "@react-navigation/native";
++import React, { useCallback, useEffect, useState } from "react";
++import { View, Text, Button, StyleSheet, FlatList, Image, TouchableOpacity, RefreshControl, Alert } from "react-native";
++import { NavigationProps, RouteProps } from "../types/navigation";
++import { listPhotos, PhotoItem, removePhoto } from "../storage/photoStorage";
++import { useFocusEffect } from "@react-navigation/native";
++import DateTimePicker from "@react-native-community/datetimepicker";
+ 
+ type Props = {
+   navigation: NavigationProps<"Timeline">;
+   route: RouteProps<"Timeline">;
+ };
+ 
+ export default function TimelineScreen({ navigation }: Props) {
+   const [photos, setPhotos] = useState<PhotoItem[]>([]);
+   const [refreshing, setRefreshing] = useState(false);
++  const [start, setStart] = useState<Date | null>(null);
++  const [end, setEnd] = useState<Date | null>(null);
++  const [showStart, setShowStart] = useState(false);
++  const [showEnd, setShowEnd] = useState(false);
+ 
+   const load = useCallback(async () => {
+     const items = await listPhotos();
+     setPhotos(items);
+   }, []);
+@@
+   const onRefresh = useCallback(async () => {
+     setRefreshing(true);
+     await load();
+     setRefreshing(false);
+   }, [load]);
+ 
++  const filtered = React.useMemo(() => {
++    return photos.filter((p) => {
++      const d = new Date(p.createdAt);
++      if (start && d < start) return false;
++      if (end && d > end) return false;
++      return true;
++    });
++  }, [photos, start, end]);
++
+   const onLongPress = useCallback((item: PhotoItem) => {
+     Alert.alert(
+       "Excluir foto?",
+       "Essa ação não pode ser desfeita.",
+       [
+@@
+   }, [load]);
+ 
+   const renderItem = ({ item }: { item: PhotoItem }) => (
+-    <TouchableOpacity style={styles.card} onPress={() => navigation.navigate("Camera")} onLongPress={() => onLongPress(item)}>
++    <TouchableOpacity
++      style={styles.card}
++      onPress={() => {
++        const ids = (filtered.length ? filtered : photos).map((p) => p.id);
++        navigation.navigate("Preview", { ids, startId: item.id });
++      }}
++      onLongPress={() => onLongPress(item)}
++    >
+       <Image source={{ uri: item.path }} style={styles.thumb} resizeMode="cover" />
+       <Text style={styles.caption}>{new Date(item.createdAt).toLocaleString()}</Text>
+     </TouchableOpacity>
+   );
+ 
+   return (
+     <View style={styles.container}>
+-      <View style={styles.headerRow}>
+-        <Text style={styles.title}>Timeline</Text>
+-        <Button title="Câmera" onPress={() => navigation.navigate("Camera")} />
+-      </View>
++      <View style={styles.headerRow}>
++        <Text style={styles.title}>Timeline</Text>
++        <View style={{ flexDirection: "row", gap: 8 }}>
++          <Button title={start ? start.toLocaleDateString() : "Início"} onPress={() => setShowStart(true)} />
++          <Button title={end ? end.toLocaleDateString() : "Fim"} onPress={() => setShowEnd(true)} />
++          <Button title="Limpar" onPress={() => { setStart(null); setEnd(null); }} />
++          <Button title="Câmera" onPress={() => navigation.navigate("Camera")} />
++        </View>
++      </View>
++
++      {showStart && (
++        <DateTimePicker
++          value={start ?? new Date()}
++          mode="date"
++          onChange={(_, d) => { setShowStart(false); if (d) setStart(new Date(d.setHours(0,0,0,0))); }}
++        />
++      )}
++      {showEnd && (
++        <DateTimePicker
++          value={end ?? new Date()}
++          mode="date"
++          onChange={(_, d) => { setShowEnd(false); if (d) setEnd(new Date(d.setHours(23,59,59,999))); }}
++        />
++      )}
+ 
+-      <FlatList
+-        data={photos}
++      <FlatList
++        data={filtered}
+         keyExtractor={(it) => it.id}
+         numColumns={2}
+         columnWrapperStyle={{ gap: 12 }}
+         contentContainerStyle={{ gap: 12, paddingBottom: 24 }}
+         renderItem={renderItem}
+*** End Patch
+*** Begin Patch
+*** Update File: App.tsx
+@@
+-import React from "react";
+-import { NavigationContainer } from "@react-navigation/native";
+-import { createNativeStackNavigator } from "@react-navigation/native-stack";
+-
+-// Importando telas
+-import LoginScreen from "./src/screens/LoginScreen";
+-import TimelineScreen from "./src/screens/TimelineScreen";
+-import ConfigScreen from "./src/screens/ConfigScreen";
+-import CameraScreen from "./src/screens/CameraScreen";
+-
+-// Caso você crie contexto de autenticação no futuro
+-// import { AuthProvider } from "./src/context/AuthContext";
+-
+-export type RootStackParamList = {
+-  Login: undefined;
+-  Timeline: undefined;
+-  Config: undefined;
+-  Camera: undefined;
+-};
+-
+-const Stack = createNativeStackNavigator<RootStackParamList>();
++import React from "react";
++import { NavigationContainer } from "@react-navigation/native";
++import { createNativeStackNavigator } from "@react-navigation/native-stack";
++import LoginScreen from "./src/screens/LoginScreen";
++import TimelineScreen from "./src/screens/TimelineScreen";
++import ConfigScreen from "./src/screens/ConfigScreen";
++import CameraScreen from "./src/screens/CameraScreen";
++import PreviewScreen from "./src/screens/PreviewScreen";
++import { RootStackParamList } from "./src/types/navigation";
++
++const Stack = createNativeStackNavigator<RootStackParamList>();
+ 
+ export default function App() {
+   return (
+-    // Se tiver AuthProvider, descomente abaixo
+-    // <AuthProvider>
+     <NavigationContainer>
+       <Stack.Navigator
+         initialRouteName="Login"
+         screenOptions={{
+           headerShown: true, // mostra o header
+         }}
+       >
+         <Stack.Screen
+           name="Login"
+           component={LoginScreen}
+           options={{ title: "Login" }}
+         />
+         <Stack.Screen
+           name="Timeline"
+           component={TimelineScreen}
+           options={{ title: "Timeline" }}
+         />
+         <Stack.Screen
+           name="Config"
+           component={ConfigScreen}
+           options={{ title: "Configurações" }}
+         />
+         <Stack.Screen
+           name="Camera"
+           component={CameraScreen}
+           options={{ title: "Câmera" }}
+         />
++        <Stack.Screen
++          name="Preview"
++          component={PreviewScreen}
++          options={{ title: "Preview" }}
++        />
+       </Stack.Navigator>
+     </NavigationContainer>
+-    // </AuthProvider>
+   );
+ }
+*** End Patch
